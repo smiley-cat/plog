@@ -1,6 +1,4 @@
 #pragma once
-#include <plog/Appenders/IAppender.h>
-#include <plog/WinApi.h>
 
 namespace plog
 {
@@ -8,7 +6,18 @@ namespace plog
     class EventLogAppender : public IAppender
     {
     public:
-        EventLogAppender(const wchar_t* sourceName) : m_eventSource(RegisterEventSourceW(NULL, sourceName))
+        EventLogAppender(const wchar_t* sourceName) : 
+            m_eventSource(RegisterEventSourceW(NULL, sourceName)),
+            m_eventCategory(0),
+            m_eventMessageId(0)
+        {
+        }
+
+        EventLogAppender(const wchar_t* sourceName, const WORD eventCategory, const DWORD eventMessageId) :
+            m_eventSource(RegisterEventSourceW(NULL, sourceName)),
+            m_eventCategory(eventCategory),
+            m_eventMessageId(eventMessageId)
+            
         {
         }
 
@@ -22,7 +31,15 @@ namespace plog
             std::wstring str = Formatter::format(record);
             const wchar_t* logMessagePtr[] = { str.c_str() };
 
-            ReportEventW(m_eventSource, logSeverityToType(record.getSeverity()), static_cast<WORD>(record.getSeverity()), 0, NULL, 1, 0, logMessagePtr, NULL);
+            ReportEventW(m_eventSource, 
+                logSeverityToType(record.getSeverity()), 
+                m_eventCategory ? m_eventCategory : static_cast<WORD>(record.getSeverity()),
+                m_eventMessageId, 
+                NULL, 
+                1,
+                0, 
+                logMessagePtr, 
+                NULL);
         }
 
     private:
@@ -47,12 +64,18 @@ namespace plog
 
     private:
         HANDLE m_eventSource;
+        WORD m_eventCategory;
+        DWORD m_eventMessageId;
     };
 
     class EventLogAppenderRegistry
     {
     public:
-        static bool add(const wchar_t* sourceName, const wchar_t* logName = L"Application")
+        static bool add(
+            const wchar_t* sourceName,
+            const wchar_t* logName = L"Application",
+            const wchar_t* eventMessageFile = L"%windir%\\Microsoft.NET\\Framework\\v4.0.30319\\EventLogMessages.dll;%windir%\\Microsoft.NET\\Framework\\v2.0.50727\\EventLogMessages.dll",
+            const WORD categoryCount = 0)
         {
             std::wstring logKeyName;
             std::wstring sourceKeyName;
@@ -66,9 +89,14 @@ namespace plog
 
             const DWORD kTypesSupported = eventLog::kErrorType | eventLog::kWarningType | eventLog::kInformationType;
             RegSetValueExW(sourceKey, L"TypesSupported", 0, regType::kDword, &kTypesSupported, sizeof(kTypesSupported));
+            
+            if (categoryCount > 0)
+            {
+                RegSetValueExW(sourceKey, L"CategoryCount", 0, regType::kDword, reinterpret_cast<const BYTE*>(&categoryCount), sizeof(DWORD));
+                RegSetValueExW(sourceKey, L"CategoryMessageFile", 0, regType::kExpandSz, reinterpret_cast<const BYTE*>(eventMessageFile), static_cast<DWORD>(::wcslen(eventMessageFile) * sizeof(wchar_t)));
+            }
 
-            const wchar_t kEventMessageFile[] = L"%windir%\\Microsoft.NET\\Framework\\v4.0.30319\\EventLogMessages.dll;%windir%\\Microsoft.NET\\Framework\\v2.0.50727\\EventLogMessages.dll";
-            RegSetValueExW(sourceKey, L"EventMessageFile", 0, regType::kExpandSz, kEventMessageFile, static_cast<DWORD>(::wcslen(kEventMessageFile) * sizeof(wchar_t)));
+            RegSetValueExW(sourceKey, L"EventMessageFile", 0, regType::kExpandSz, reinterpret_cast<const BYTE*>(eventMessageFile), static_cast<DWORD>(::wcslen(eventMessageFile) * sizeof(wchar_t)));
 
             RegCloseKey(sourceKey);
             return true;
